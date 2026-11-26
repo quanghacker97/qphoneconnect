@@ -7,6 +7,7 @@ file và văn bản hai chiều với máy tính. Chỉ dùng thư viện chuẩ
 """
 from __future__ import annotations
 
+import faulthandler
 import json
 import logging
 import mimetypes
@@ -63,15 +64,47 @@ def default_folder() -> Path:
     return (docs if docs.is_dir() else Path.home()) / APP_NAME
 
 
+_crash_file = None  # giữ handle mở để faulthandler còn ghi được
+
+
+def _thread_excepthook(args) -> None:
+    if args.exc_type is SystemExit:
+        return
+    log.error("Lỗi không bắt được ở luồng %s", getattr(args.thread, "name", "?"),
+              exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+
 def setup_logging() -> Path:
-    path = app_data_dir() / "qphoneconnect.log"
+    """Ghi log vào %APPDATA%\\QPhoneConnect\\qphoneconnect.log.
+
+    Bản .exe (--windowed) không có console: sys.stderr là None nên mọi lỗi in ra màn hình
+    đều biến mất. Vì vậy cả lỗi của pywebview/WebView2 và crash cứng cũng được dẫn vào file.
+    """
+    global _crash_file
+    folder = app_data_dir()
+    path = folder / "qphoneconnect.log"
     log.setLevel(logging.INFO)
     if not log.handlers:
         fh = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         log.addHandler(fh)
         if sys.stderr is not None:  # bản .exe không có console
             log.addHandler(logging.StreamHandler(sys.stderr))
+
+        # pywebview báo lỗi (vd. "WebView2 initialization failed") qua logger "pywebview" rồi
+        # bỏ qua, không ném exception -> nếu không ghi file thì không ai biết vì sao cửa sổ không lên.
+        # Phải gắn trước `import webview`: khi đã có handler, pywebview không tự thêm StreamHandler nữa.
+        wl = logging.getLogger("pywebview")
+        wl.setLevel(logging.INFO)
+        wl.addHandler(fh)
+
+        # Lỗi ở luồng phụ và crash cứng (pythonnet/WebView2 làm chết tiến trình, không có traceback Python)
+        threading.excepthook = _thread_excepthook
+        try:
+            _crash_file = open(folder / "crash.log", "a", encoding="utf-8")
+            faulthandler.enable(_crash_file)
+        except Exception:  # pragma: no cover
+            pass
     return path
 
 
