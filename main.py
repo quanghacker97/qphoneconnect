@@ -134,8 +134,20 @@ def run_window(webview, app: core.QPhoneServer, url: str) -> bool:
         background_color="#0f172a", text_select=True,
     )
     api._window = window
+    t0 = time.monotonic()
 
-    def watchdog() -> None:  # chạy ở luồng riêng sau khi vòng lặp GUI bắt đầu
+    # Các mốc này cho biết app dừng ở bước nào nếu cửa sổ không lên (xem file log)
+    def on_shown() -> None:
+        core.log.info("Cửa sổ đã hiện (%.1fs)", time.monotonic() - t0)
+
+    def on_loaded() -> None:
+        core.log.info("Giao diện đã tải xong (%.1fs)", time.monotonic() - t0)
+
+    window.events.shown += on_shown
+    window.events.loaded += on_loaded
+
+    def watchdog() -> None:  # chạy ở luồng riêng sau khi pywebview khởi tạo xong engine
+        core.log.info("Đã khởi tạo engine, chờ giao diện tải (tối đa %ss)", WINDOW_TIMEOUT)
         if window.events.loaded.wait(WINDOW_TIMEOUT):
             return
         core.log.error("Giao diện chưa tải xong sau %ss - đóng cửa sổ để chuyển sang trình duyệt", WINDOW_TIMEOUT)
@@ -145,6 +157,7 @@ def run_window(webview, app: core.QPhoneServer, url: str) -> bool:
             core.log.exception("Không đóng được cửa sổ bị lỗi")
 
     icon = core.BASE_DIR / "assets" / "icon.png"
+    core.log.info("Gọi webview.start() - khởi tạo pythonnet/WebView2, trang: %s", url)
     try:
         webview.start(watchdog, icon=str(icon) if icon.exists() else None)
     except TypeError:  # pywebview cũ không có tham số icon
@@ -184,6 +197,7 @@ def main() -> None:
         elif not has_webview2():
             core.log.warning("Không tìm thấy Microsoft Edge WebView2 Runtime - chạy bằng trình duyệt")
         else:
+            core.log.info("Nạp pywebview")
             try:
                 import webview  # type: ignore
             except Exception:

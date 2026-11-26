@@ -22,6 +22,7 @@ import threading
 import time
 import uuid
 from http import cookies
+from http.client import HTTPConnection, HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -95,7 +96,7 @@ def setup_logging() -> Path:
         # bỏ qua, không ném exception -> nếu không ghi file thì không ai biết vì sao cửa sổ không lên.
         # Phải gắn trước `import webview`: khi đã có handler, pywebview không tự thêm StreamHandler nữa.
         wl = logging.getLogger("pywebview")
-        wl.setLevel(logging.INFO)
+        wl.setLevel(logging.DEBUG)  # có cả "Using WinForms / Chromium" - cho biết engine nào được chọn
         wl.addHandler(fh)
 
         # Lỗi ở luồng phụ và crash cứng (pythonnet/WebView2 làm chết tiến trình, không có traceback Python)
@@ -612,6 +613,18 @@ class Handler(BaseHTTPRequestHandler):
 # --------------------------------------------------------------------------- #
 # Server
 # --------------------------------------------------------------------------- #
+class _Server(ThreadingHTTPServer):
+    # Windows: SO_REUSEADDR cho phép nhiều tiến trình cùng bind một cổng đang có người dùng mà không
+    # báo lỗi (khác Linux), nên vòng thử cổng trong start() không bao giờ nhận ra cổng bị trùng với
+    # ứng dụng khác - request có thể rơi vào app kia. Trên Windows dùng SO_EXCLUSIVEADDRUSE thay thế.
+    allow_reuse_address = not IS_WIN
+
+    def server_bind(self):
+        if IS_WIN and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 class QPhoneServer:
     def __init__(self, host: str = "0.0.0.0"):
         self.host = host
@@ -629,23 +642,48 @@ class QPhoneServer:
         self.config["folder"] = str(folder)
         log.info("Đổi thư mục lưu: %s", folder)
 
+    @staticmethod
+    def _probe(port: int) -> bool | None:
+        """Gọi thử 127.0.0.1:cổng/api/info xem có đúng QPhoneConnect trả lời không.
+
+        True = đúng; False = một chương trình khác đang trả lời cổng này; None = không kiểm tra được.
+        """
+        try:
+            conn = HTTPConnection("127.0.0.1", port, timeout=3)
+            try:
+                conn.request("GET", "/api/info")
+                data = json.loads(conn.getresponse().read().decode("utf-8", "replace"))
+            finally:
+                conn.close()
+        except ValueError:  # không phải JSON -> app khác
+            return False
+        except (OSError, HTTPException) as e:
+            log.warning("Không kiểm tra được cổng %s: %s", port, e)
+            return None
+        return isinstance(data, dict) and data.get("app") == APP_NAME
+
     def start(self) -> int:
         """Mở server trong luồng nền, trả về cổng đang dùng."""
         Handler.app = self
         want = int(self.config["port"])
         for p in range(want, want + 20):
             try:
-                self.httpd = ThreadingHTTPServer((self.host, p), Handler)
-                break
-            except OSError:
+                httpd = _Server((self.host, p), Handler)
+            except OSError as e:
+                log.info("Cổng %s đang bận (%s), thử cổng kế tiếp", p, e)
                 continue
-        else:
-            raise OSError(f"Không mở được cổng nào từ {want} đến {want + 19}")
-        self.httpd.daemon_threads = True
-        self.port = p
-        threading.Thread(target=self.httpd.serve_forever, name="http", daemon=True).start()
-        log.info("%s %s chạy ở cổng %s, thư mục %s", APP_NAME, VERSION, p, self.store.folder)
-        return p
+            httpd.daemon_threads = True
+            self.httpd, self.port = httpd, p
+            threading.Thread(target=httpd.serve_forever, name="http", daemon=True).start()
+            if self._probe(p) is False:
+                log.warning("Cổng %s đang do chương trình khác trả lời, thử cổng kế tiếp", p)
+                self.httpd, self.port = None, 0
+                httpd.shutdown()
+                httpd.server_close()
+                continue
+            log.info("%s %s chạy ở cổng %s, thư mục %s", APP_NAME, VERSION, p, self.store.folder)
+            return p
+        raise OSError(f"Không mở được cổng nào từ {want} đến {want + 19}")
 
     def stop(self):
         self.stopping = True
