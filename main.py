@@ -10,6 +10,7 @@ server chạy nền để điện thoại kết nối qua WiFi.
 from __future__ import annotations
 
 import os
+import platform
 import sys
 import time
 import traceback
@@ -98,12 +99,17 @@ def has_webview2() -> bool:
     return False
 
 
-def run_browser_mode(app: core.QPhoneServer, url: str) -> None:
+NO_WEBVIEW2_NOTE = ("Máy chưa có Microsoft Edge WebView2 nên không mở được cửa sổ riêng.\n"
+                    "Cài tại: https://go.microsoft.com/fwlink/p/?LinkId=2124703")
+
+# Giao diện phải tải xong trong khoảng này, quá hạn thì coi như cửa sổ app không lên được
+WINDOW_TIMEOUT = 20  # giây
+
+
+def run_browser_mode(app: core.QPhoneServer, url: str, note: str = NO_WEBVIEW2_NOTE) -> None:
     webbrowser.open(url)
     if sys.stdout is None and core.IS_WIN:  # bản .exe không có console
-        message_box("QPhoneConnect đang chạy trong trình duyệt.\n"
-                    "Máy chưa có Microsoft Edge WebView2 nên không mở được cửa sổ riêng.\n"
-                    "Cài tại: https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n"
+        message_box(f"QPhoneConnect đang chạy trong trình duyệt.\n{note}\n\n"
                     "Bấm OK để TẮT QPhoneConnect.")
         return
     print(f"{core.APP_NAME} {core.VERSION} - mở {url}  (Ctrl+C để tắt)")
@@ -115,49 +121,89 @@ def run_browser_mode(app: core.QPhoneServer, url: str) -> None:
         pass
 
 
+def run_window(webview, app: core.QPhoneServer, url: str) -> bool:
+    """Mở cửa sổ app và chờ đến khi đóng.
+
+    Trả về False nếu giao diện chưa từng tải được (WebView2 khởi tạo lỗi, cửa sổ trống...)
+    để người gọi chuyển sang trình duyệt thay vì thoát im lặng.
+    """
+    api = Api(app)
+    window = webview.create_window(
+        core.APP_NAME, url, js_api=api,
+        width=1120, height=800, min_size=(420, 560),
+        background_color="#0f172a", text_select=True,
+    )
+    api._window = window
+
+    def watchdog() -> None:  # chạy ở luồng riêng sau khi vòng lặp GUI bắt đầu
+        if window.events.loaded.wait(WINDOW_TIMEOUT):
+            return
+        core.log.error("Giao diện chưa tải xong sau %ss - đóng cửa sổ để chuyển sang trình duyệt", WINDOW_TIMEOUT)
+        try:
+            window.destroy()
+        except Exception:
+            core.log.exception("Không đóng được cửa sổ bị lỗi")
+
+    icon = core.BASE_DIR / "assets" / "icon.png"
+    try:
+        webview.start(watchdog, icon=str(icon) if icon.exists() else None)
+    except TypeError:  # pywebview cũ không có tham số icon
+        webview.start(watchdog)
+
+    loaded = window.events.loaded.is_set()
+    core.log.info("Cửa sổ đã đóng (renderer=%s, đã tải giao diện=%s)", getattr(webview, "renderer", None), loaded)
+    return loaded
+
+
 def main() -> None:
     log_path = core.setup_logging()
-    if already_running():
-        focus_existing_window()
-        return
-
-    app = core.QPhoneServer()
+    core.log.info("Khởi động %s %s | Python %s | %s | frozen=%s", core.APP_NAME, core.VERSION,
+                  platform.python_version(), platform.platform(), bool(getattr(sys, "frozen", False)))
+    app = None
+    exit_code = 0
     try:
-        app.start()
-    except OSError as e:
-        message_box(f"Không khởi động được server:\n{e}", error=True)
-        return
-    url = f"http://127.0.0.1:{app.port}/"
+        if already_running():
+            core.log.info("Đã có một cửa sổ QPhoneConnect đang chạy")
+            focus_existing_window()
+            return
 
-    webview = None
-    if "--browser" not in sys.argv and has_webview2():
+        app = core.QPhoneServer()
         try:
-            import webview  # type: ignore
-        except ImportError:
-            webview = None
+            app.start()
+        except OSError as e:
+            core.log.error("Không khởi động được server: %s", e)
+            message_box(f"Không khởi động được server:\n{e}", error=True)
+            exit_code = 1
+            return
+        url = f"http://127.0.0.1:{app.port}/"
 
-    try:
-        if webview is None:
-            run_browser_mode(app, url)
+        webview = None
+        note = NO_WEBVIEW2_NOTE
+        if "--browser" in sys.argv:
+            note = "Đang chạy theo tùy chọn --browser."
+        elif not has_webview2():
+            core.log.warning("Không tìm thấy Microsoft Edge WebView2 Runtime - chạy bằng trình duyệt")
         else:
-            api = Api(app)
-            window = webview.create_window(
-                core.APP_NAME, url, js_api=api,
-                width=1120, height=800, min_size=(420, 560),
-                background_color="#0f172a", text_select=True,
-            )
-            api._window = window
-            icon = core.BASE_DIR / "assets" / "icon.png"
             try:
-                webview.start(icon=str(icon) if icon.exists() else None)
-            except TypeError:  # pywebview cũ không có tham số icon
-                webview.start()
+                import webview  # type: ignore
+            except Exception:
+                core.log.error("Không nạp được pywebview:\n%s", traceback.format_exc())
+                note = f"Không nạp được thư viện cửa sổ (pywebview).\nChi tiết lỗi: {log_path}"
+
+        if webview is None:
+            run_browser_mode(app, url, note)
+        elif not run_window(webview, app, url):
+            core.log.error("Cửa sổ app không hiển thị được - chuyển sang trình duyệt")
+            run_browser_mode(app, url, f"Không mở được cửa sổ riêng nên chạy bằng trình duyệt.\n"
+                                       f"Chi tiết lỗi: {log_path}")
     except Exception:
         core.log.error("Lỗi: %s", traceback.format_exc())
         message_box(f"QPhoneConnect gặp lỗi. Chi tiết trong:\n{log_path}", error=True)
+        exit_code = 1
     finally:
-        app.stop()
-        os._exit(0)  # đóng luôn các kết nối điện thoại đang mở
+        if app is not None:
+            app.stop()
+        os._exit(exit_code)  # đóng luôn các kết nối điện thoại đang mở
 
 
 if __name__ == "__main__":
