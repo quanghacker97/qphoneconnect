@@ -156,7 +156,9 @@ def run_window(webview, app: core.QPhoneServer, url: str) -> bool:
         except Exception:
             core.log.exception("Không đóng được cửa sổ bị lỗi")
 
-    icon = core.BASE_DIR / "assets" / "icon.png"
+    # Windows (WinForms) tạo icon bằng System.Drawing.Icon - chỉ nhận .ico. Đưa .png vào sẽ ném
+    # ArgumentException ở luồng .NET, làm cả tiến trình chết ngay mà không để lại log Python nào.
+    icon = core.BASE_DIR / "assets" / ("icon.ico" if core.IS_WIN else "icon.png")
     core.log.info("Gọi webview.start() - khởi tạo pythonnet/WebView2, trang: %s", url)
     try:
         webview.start(watchdog, icon=str(icon) if icon.exists() else None)
