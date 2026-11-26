@@ -1,0 +1,2 @@
+pywebview>=5.0   # cửa sổ app (dùng WebView2 có sẵn trên Windows 10/11)
+qrcode>=7.4      # vẽ mã QR

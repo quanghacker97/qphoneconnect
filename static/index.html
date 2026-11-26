@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>QPhoneConnect</title>
+<style>
+  :root{
+    --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8;
+    --accent:#38bdf8; --accent2:#0ea5e9; --ok:#22c55e; --bad:#ef4444; --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;padding:12px 16px;
+    background:rgba(15,23,42,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  header h1{font-size:18px;margin:0;flex:1;letter-spacing:.2px}
+  header h1 small{font-size:11px;color:var(--muted);font-weight:500;margin-left:6px}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--bad);display:inline-block;flex:none}
+  .dot.on{background:var(--ok)}
+  #status{font-size:13px;color:var(--muted);text-align:right}
+  main{max-width:900px;margin:0 auto;padding:16px;display:grid;gap:16px}
+  .col{display:grid;gap:16px;align-content:start}
+  body.pc main{max-width:1280px;grid-template-columns:minmax(330px,400px) 1fr;align-items:start}
+  body.pc .side{position:sticky;top:66px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+  .card h2,.h2{font-size:14px;margin:0 0 12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  #connect{display:none;text-align:center}
+  #qr{width:210px;height:210px;margin:0 auto 12px;background:#fff;border-radius:12px;padding:6px;display:grid;place-items:center}
+  #qr img{width:100%;height:100%}
+  code{background:#0b1220;padding:6px 8px;border-radius:8px;display:block;word-break:break-all;font-size:12px;text-align:left}
+  .small{font-size:12px;color:var(--muted)}
+  textarea{width:100%;min-height:80px;resize:vertical;background:#0b1220;color:var(--text);border:1px solid var(--line);
+    border-radius:10px;padding:10px;font:inherit}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  #connect .row{justify-content:center}
+  button,.btn{appearance:none;border:0;border-radius:10px;padding:10px 14px;font:inherit;font-weight:600;cursor:pointer;
+    background:var(--accent2);color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+  button:hover,.btn:hover{filter:brightness(1.1)}
+  button.ghost,.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+  button.danger{background:transparent;border:1px solid var(--line);color:#fca5a5}
+  button:active{transform:scale(.97)}
+  #drop{border:2px dashed var(--line);border-radius:var(--radius);padding:22px;text-align:center;color:var(--muted);cursor:pointer}
+  #drop.over{border-color:var(--accent);color:var(--accent);background:rgba(56,189,248,.06)}
+  #uploads:empty{display:none}
+  .up{margin-top:10px;font-size:13px}
+  .bar{height:6px;background:#0b1220;border-radius:6px;overflow:hidden;margin-top:4px}
+  .bar>i{display:block;height:100%;width:0;background:var(--accent)}
+  #devices{margin-top:12px;text-align:left}
+  .dev{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px}
+  #feed{display:grid;gap:10px}
+  .item{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+  .meta{font-size:12px;color:var(--muted);margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap}
+  .meta b{color:var(--accent)}
+  .fname{font-weight:600;word-break:break-all}
+  .txt{white-space:pre-wrap;word-break:break-word;margin:0;font:inherit}
+  .thumb{display:block;max-width:100%;max-height:260px;border-radius:10px;margin-top:8px}
+  body.pc img.thumb{cursor:zoom-in}
+  .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .actions button,.actions .btn{padding:7px 11px;font-size:13px}
+  .empty{color:var(--muted);text-align:center;padding:40px 24px;border:1px dashed var(--line);border-radius:var(--radius)}
+  #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#111827;border:1px solid var(--line);
+    padding:10px 16px;border-radius:10px;opacity:0;transition:.25s;pointer-events:none;z-index:10}
+  #toast.show{opacity:1}
+  details summary{cursor:pointer}
+  @media (max-width:820px){ body.pc main{grid-template-columns:1fr} body.pc .side{position:static} }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>📲 QPhoneConnect<small id="ver"></small></h1>
+  <span id="status">Đang kết nối…</span>
+</header>
+
+<main>
+  <div class="col side">
+    <!-- Chỉ hiện trên máy tính -->
+    <section class="card" id="connect">
+      <h2>Kết nối điện thoại</h2>
+      <div id="qr"></div>
+      <div class="small" style="margin-bottom:8px">Điện thoại bật WiFi <b>cùng mạng</b> với máy tính → mở Camera quét mã QR</div>
+      <code id="url">…</code>
+      <details id="otherBox" class="small" style="margin-top:8px;text-align:left" hidden>
+        <summary>Quét không vào được? Thử địa chỉ khác</summary>
+        <div id="otherUrls"></div>
+      </details>
+      <div class="row">
+        <button class="ghost" id="copyUrl">📋 Sao chép địa chỉ</button>
+      </div>
+      <div id="devices"></div>
+    </section>
+
+    <section class="card">
+      <h2>Gửi văn bản / link</h2>
+      <textarea id="text" placeholder="Nhập hoặc dán văn bản, link… (Ctrl+Enter để gửi)"></textarea>
+      <div class="row">
+        <button id="sendText">Gửi văn bản</button>
+        <button class="ghost" id="pasteBtn">Dán từ clipboard</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Gửi file</h2>
+      <div id="drop">⬆️ Bấm để chọn file<span class="pc-only"><br>hoặc kéo thả / Ctrl+V vào cửa sổ</span></div>
+      <input type="file" id="file" multiple hidden>
+      <div id="uploads"></div>
+    </section>
+
+    <section class="card pc-only" id="folderCard" hidden>
+      <h2>Thư mục lưu file</h2>
+      <code id="folder"></code>
+      <div class="row">
+        <button class="ghost" id="openFolder">📁 Mở thư mục</button>
+        <button class="ghost" id="chooseFolder" hidden>Đổi thư mục…</button>
+      </div>
+    </section>
+  </div>
+
+  <section class="col">
+    <div class="h2" style="margin:0">Hộp chung (máy tính ⇄ điện thoại)</div>
+    <div id="feed"></div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let INFO = {}, ITEMS = [];
+const ME = (() => {
+  const ua = navigator.userAgent;
+  if (/iPhone/i.test(ua)) return "iPhone";
+  if (/iPad/i.test(ua)) return "iPad";
+  if (/Android/i.test(ua)) return "Android";
+  return "Máy tính";
+})();
+
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2000); }
+function fmtSize(b){ if(b<1024) return b+" B"; const u=["KB","MB","GB","TB"]; let i=-1; do{b/=1024;i++}while(b>=1024&&i<u.length-1); return b.toFixed(b<10?1:0)+" "+u[i]; }
+function fmtTime(ts){ return new Date(ts*1000).toLocaleString("vi-VN",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"}); }
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function linkify(s){ return esc(s).replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener" style="color:var(--accent)">$1</a>'); }
+function icon(mime){ return mime.startsWith("image/")?"🖼️":mime.startsWith("video/")?"🎬":mime.startsWith("audio/")?"🎵":
+  /pdf/.test(mime)?"📕":/zip|rar|7z|compressed/.test(mime)?"🗜️":"📄"; }
+
+async function api(path, opts={}){
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.error || ("Lỗi "+r.status));
+  return data;
+}
+const post = p => api(p,{method:"POST"}).catch(e=>toast(e.message));
+
+// navigator.clipboard chỉ chạy trên https/localhost -> có dự phòng cho điện thoại
+async function copyText(text){
+  try{ await navigator.clipboard.writeText(text); }
+  catch{
+    const ta=document.createElement("textarea"); ta.value=text; ta.style.position="fixed"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand("copy"); ta.remove();
+  }
+  toast("Đã sao chép");
+}
+
+// ---------- danh sách ----------
+function render(){
+  const feed=$("#feed");
+  if(!ITEMS.length){
+    feed.innerHTML = `<div class="empty">Chưa có gì.<br>${INFO.is_pc?"Quét mã QR bằng điện thoại rồi gửi thử một file nhé.":"Gửi thử một file hoặc đoạn văn bản nhé."}</div>`;
+    return;
+  }
+  feed.innerHTML = ITEMS.slice().sort((a,b)=>b.ts-a.ts).map(it=>{
+    const meta = `<div class="meta"><b>${esc(it.sender||"?")}</b><span>${fmtTime(it.ts)}</span>${it.kind==="file"?`<span>${fmtSize(it.size)}</span>`:""}</div>`;
+    const del = `<button class="danger" data-act="del">Xóa</button>`;
+    if(it.kind==="text"){
+      return `<div class="item" data-id="${it.id}">${meta}<pre class="txt">${linkify(it.text)}</pre>
+        <div class="actions"><button data-act="copy">📋 Sao chép</button>${del}</div></div>`;
+    }
+    const src=`/api/file/${it.id}`, mime=it.mime||"";
+    let preview="";
+    if(mime.startsWith("image/")) preview=`<img class="thumb" data-act="open" loading="lazy" src="${src}?inline=1" alt="">`;
+    else if(mime.startsWith("video/")) preview=`<video class="thumb" controls preload="metadata" src="${src}?inline=1"></video>`;
+    else if(mime.startsWith("audio/")) preview=`<audio controls preload="none" src="${src}?inline=1" style="width:100%;margin-top:8px"></audio>`;
+    const acts = INFO.is_pc
+      ? `<button data-act="open">Mở</button><button class="ghost" data-act="reveal">📁 Hiện trong thư mục</button>${del}`
+      : `<a class="btn" href="${src}" download="${esc(it.name)}">⬇️ Tải về</a><a class="btn ghost" href="${src}?inline=1" target="_blank">Mở</a>${del}`;
+    return `<div class="item" data-id="${it.id}">${meta}<div class="fname">${icon(mime)} ${esc(it.name)}</div>${preview}
+      <div class="actions">${acts}</div></div>`;
+  }).join("");
+}
+
+$("#feed").addEventListener("click", async e=>{
+  const el=e.target.closest("[data-act]"); if(!el) return;
+  const id=el.closest(".item").dataset.id, it=ITEMS.find(x=>x.id===id); if(!it) return;
+  const act=el.dataset.act;
+  if(act==="copy") copyText(it.text);
+  if(act==="open" && INFO.is_pc) post(`/api/open/${id}`);
+  if(act==="reveal") post(`/api/reveal/${id}`);
+  if(act==="del"){
+    if(!confirm(it.kind==="file" ? `Xóa file "${it.name}" khỏi máy tính?` : "Xóa đoạn văn bản này?")) return;
+    api(`/api/items/${id}`,{method:"DELETE"}).catch(err=>toast(err.message));
+  }
+});
+
+function renderDevices(list){
+  if(!INFO.is_pc) return;
+  const n=list.length;
+  $("#status").textContent = n ? `${n} điện thoại đang kết nối` : "Chờ điện thoại kết nối…";
+  $("#devices").innerHTML = n ? list.map(d=>`<div class="dev"><span class="dot on"></span>📱 ${esc(d.name)} <span class="small">${esc(d.ip)}</span></div>`).join("") : "";
+}
+
+// ---------- gửi văn bản ----------
+async function sendText(){
+  const text=$("#text").value.trim(); if(!text) return;
+  try{
+    await api("/api/text",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,sender:ME})});
+    $("#text").value=""; toast("Đã gửi");
+  }catch(err){ toast(err.message); }
+}
+$("#sendText").onclick=sendText;
+$("#text").addEventListener("keydown",e=>{ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)) sendText(); });
+$("#pasteBtn").onclick=async()=>{
+  try{ $("#text").value += await navigator.clipboard.readText(); }
+  catch{ toast("Không đọc được clipboard – nhấn giữ ô nhập rồi chọn Dán"); }
+};
+
+// ---------- gửi file ----------
+function uploadFile(file){
+  return new Promise(resolve=>{
+    const box=document.createElement("div"); box.className="up";
+    box.innerHTML=`<div>${esc(file.name)} <span class="small">(${fmtSize(file.size)})</span> – <span class="pct">0%</span></div><div class="bar"><i></i></div>`;
+    $("#uploads").appendChild(box);
+    const xhr=new XMLHttpRequest();
+    xhr.open("POST","/api/upload");
+    xhr.setRequestHeader("X-Filename",encodeURIComponent(file.name));
+    xhr.setRequestHeader("X-Sender",encodeURIComponent(ME));
+    const t0=Date.now();
+    xhr.upload.onprogress=e=>{
+      if(!e.lengthComputable) return;
+      const p=e.loaded/e.total*100, sec=(Date.now()-t0)/1000;
+      box.querySelector("i").style.width=p+"%";
+      box.querySelector(".pct").textContent=`${p.toFixed(0)}% · ${fmtSize(e.loaded/Math.max(sec,.1))}/s`;
+    };
+    xhr.onload=()=>{ box.querySelector(".pct").textContent = xhr.status<300 ? "✅ Xong" : "❌ Lỗi"; setTimeout(()=>box.remove(),2500); resolve(); };
+    xhr.onerror=()=>{ box.querySelector(".pct").textContent="❌ Mất kết nối"; resolve(); };
+    xhr.send(file);
+  });
+}
+async function uploadFiles(list){ for(const f of list) await uploadFile(f); }
+$("#drop").onclick=()=>$("#file").click();
+$("#file").onchange=e=>{ uploadFiles([...e.target.files]); e.target.value=""; };
+["dragenter","dragover"].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();$("#drop").classList.add("over");}));
+["dragleave","drop"].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();$("#drop").classList.remove("over");}));
+document.addEventListener("drop",e=>{ if(e.dataTransfer.files.length) uploadFiles([...e.dataTransfer.files]); });
+document.addEventListener("paste",e=>{
+  if(document.activeElement===$("#text")) return;
+  const files=[...((e.clipboardData&&e.clipboardData.files)||[])]; if(files.length) uploadFiles(files);
+});
+
+// ---------- realtime ----------
+async function reload(){
+  try{ ITEMS=await api("/api/items"); render(); }catch{}
+  if(INFO.is_pc){ try{ INFO=await api("/api/info"); applyPcInfo(); }catch{} }
+}
+function connectEvents(){
+  const es=new EventSource("/api/events");
+  es.onopen=()=>{ $("#dot").classList.add("on"); if(!INFO.is_pc) $("#status").textContent="Đã kết nối"; reload(); };
+  es.onerror=()=>{ $("#dot").classList.remove("on"); $("#status").textContent="Mất kết nối, đang thử lại…"; };
+  es.onmessage=e=>{
+    const ev=JSON.parse(e.data);
+    if(ev.type==="add"){ ITEMS.push(ev.item); if(ev.item.sender!==ME) toast(`Mới từ ${ev.item.sender}`); render(); }
+    if(ev.type==="remove"){ ITEMS=ITEMS.filter(x=>x.id!==ev.id); render(); }
+    if(ev.type==="devices"){ renderDevices(ev.list); }
+    if(ev.type==="reset"){ reload(); }
+  };
+}
+
+// ---------- máy tính ----------
+function applyPcInfo(){
+  $("#url").textContent=INFO.url;
+  $("#folder").textContent=INFO.folder;
+  $("#qr").innerHTML = INFO.qr ? `<img src="/api/qr.svg?url=${encodeURIComponent(INFO.url)}&_=${Date.now()}" alt="QR">`
+    : `<div style="color:#334155;font-size:12px;padding:8px">Thiếu gói qrcode.<br>Gõ địa chỉ bên dưới vào trình duyệt điện thoại.</div>`;
+  const others=INFO.other_urls||[];
+  $("#otherBox").hidden=!others.length;
+  $("#otherUrls").innerHTML=others.map(u=>`<code style="margin-top:6px" data-url="${esc(u)}">${esc(u)}</code>`).join("");
+  renderDevices(INFO.devices||[]);
+}
+$("#otherUrls").addEventListener("click",e=>{
+  const c=e.target.closest("[data-url]"); if(!c) return;
+  INFO.url=c.dataset.url; $("#url").textContent=INFO.url;
+  $("#qr img") && ($("#qr img").src=`/api/qr.svg?url=${encodeURIComponent(INFO.url)}`);
+});
+
+function enableNativeApi(){
+  if(!(window.pywebview && window.pywebview.api && window.pywebview.api.choose_folder)) return;
+  $("#chooseFolder").hidden=false;
+  $("#chooseFolder").onclick=async()=>{
+    try{ const f=await window.pywebview.api.choose_folder(); if(f) toast("Đã đổi thư mục lưu"); }
+    catch(e){ toast("Không đổi được thư mục: "+e); }
+  };
+}
+window.addEventListener("pywebviewready", enableNativeApi);
+
+// ---------- khởi động ----------
+(async()=>{
+  try{ INFO=await api("/api/info"); }catch(err){ $("#status").textContent=err.message; return; }
+  $("#ver").textContent="v"+INFO.version;
+  if(INFO.is_pc){
+    document.body.classList.add("pc");
+    $("#connect").style.display="block";
+    $("#folderCard").hidden=false;
+    $("#copyUrl").onclick=()=>copyText(INFO.url);
+    $("#openFolder").onclick=()=>post("/api/open-folder");
+    applyPcInfo();
+    enableNativeApi();
+  } else {
+    document.querySelectorAll(".pc-only").forEach(e=>e.remove());
+  }
+  render();
+  connectEvents();
+})();
+</script>
+</body>
+</html>

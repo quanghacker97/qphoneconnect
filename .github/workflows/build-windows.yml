@@ -1,0 +1,46 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:        # bấm "Run workflow" trên tab Actions
+  push:
+    tags: ["v*"]            # đẩy tag v1.0.0 -> tự build + tạo Release
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cài Inno Setup (nếu máy build chưa có)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Build
+        shell: cmd
+        run: build.bat
+
+      - name: Tải kết quả lên (tab Actions -> Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: QPhoneConnect-Windows
+          path: |
+            dist/QPhoneConnect-Setup-*.exe
+            dist/QPhoneConnect-*-Portable.zip
+
+      - name: Tạo Release khi đẩy tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/QPhoneConnect-Setup-*.exe
+            dist/QPhoneConnect-*-Portable.zip
